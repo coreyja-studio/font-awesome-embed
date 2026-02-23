@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pr-title:
+    uses: ./.github/workflows/_pr-title.yml
+
+  fmt:
+    uses: ./.github/workflows/_fmt.yml
+
+  rust-checks:
+    uses: ./.github/workflows/_rust-checks.yml
+
+  cargo-deny:
+    uses: ./.github/workflows/_cargo-deny.yml
+
+  ready:
+    if: always()
+    needs: [pr-title, fmt, rust-checks, cargo-deny]
+    runs-on: [self-hosted, small]
+    steps:
+      - name: Check results
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          for result in $results; do
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "Job result: $result (expected success or skipped)"
+              exit 1
+            fi
+          done
