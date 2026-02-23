@@ -1,0 +1,16 @@
+[package]
+name = "font-awesome-embed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Embed Font Awesome SVGs into Rust binaries at compile time"
+
+[features]
+default = []
+test-icons = ["font-awesome-embed-macros/test-icons"]
+maud = ["dep:maud"]
+
+[dependencies]
+font-awesome-embed-macros = { path = "../font-awesome-embed-macros" }
+maud = { workspace = true, optional = true }
