@@ -14,3 +14,6 @@ maud = ["dep:maud"]
 [dependencies]
 font-awesome-embed-macros = { path = "../font-awesome-embed-macros" }
 maud = { workspace = true, optional = true }
+
+[dev-dependencies]
+trybuild = "1"
