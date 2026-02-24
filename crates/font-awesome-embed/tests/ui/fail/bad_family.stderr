@@ -1,0 +1,5 @@
+error: unknown Font Awesome family: `comic_sans`. Expected one of: classic, duotone, sharp, sharp_duotone, chisel, etch, graphite, jelly, jelly_duo, jelly_fill, notdog, notdog_duo, slab, slab_press, thumbprint, utility, utility_duo, utility_fill, whiteboard
+ --> tests/ui/fail/bad_family.rs:3:42
+  |
+3 |     let _ = fa!("house", solid, family = comic_sans);
+  |                                          ^^^^^^^^^^
