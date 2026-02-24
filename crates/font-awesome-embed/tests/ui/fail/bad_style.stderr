@@ -1,4 +1,4 @@
-error: unknown Font Awesome style: `italic`. Expected one of: solid, regular, brands, light, thin, duotone, sharp_solid, sharp_regular, kit, kit_duotone
+error: unknown Font Awesome style: `italic`. Expected one of: brands, duotone, light, regular, semibold, solid, thin
  --> tests/ui/fail/bad_style.rs:4:26
   |
 4 |     let _ = fa!("house", italic);
