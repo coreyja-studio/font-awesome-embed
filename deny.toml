@@ -1,0 +1,8 @@
+[bans]
+deny = [
+    { name = "openssl" },
+    { name = "openssl-sys" },
+]
+
+[sources.allow-org]
+github = ["coreyja", "coreyja-studio"]
