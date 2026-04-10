@@ -201,6 +201,7 @@ fn default_family() -> syn::Result<FaFamily> {
 }
 
 #[proc_macro]
+#[allow(clippy::needless_return)]
 pub fn fa(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as FaInput);
     let name = &input.name;
