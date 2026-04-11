@@ -7,9 +7,10 @@ pub fn get_icon(name: &str, family: &str, style: &str, cache_key: &str) -> Resul
     #[cfg(feature = "test-icons")]
     {
         let _ = (family, cache_key); // suppress unused warnings
+        let style_lower = style.to_lowercase();
         #[allow(clippy::needless_return)]
         return Ok(format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true" width="1em" height="1em" class="fa-svg" data-icon="{name}" data-style="{style}">{}</svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true" width="1em" height="1em" class="fa-svg" data-icon="{name}" data-style="{style_lower}">{}</svg>"#,
             r#"<rect width="512" height="512" fill="currentColor" opacity="0.2"/>"#
         ));
     }
