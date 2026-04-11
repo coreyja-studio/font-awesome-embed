@@ -2,7 +2,6 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Ident, LitStr, Token, parse::Parse, parse::ParseStream, parse_macro_input};
 
-#[cfg(not(feature = "test-icons"))]
 mod fetch;
 #[cfg(not(feature = "test-icons"))]
 mod postprocess;
@@ -140,21 +139,17 @@ impl FaStyle {
 
 struct FaInput {
     name: String,
-    #[cfg(not(feature = "test-icons"))]
     name_span: proc_macro2::Span,
     style: FaStyle,
-    style_str: String,
     family: FaFamily,
 }
 
 impl Parse for FaInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let name_lit: LitStr = input.parse()?;
-        #[cfg(not(feature = "test-icons"))]
         let name_span = name_lit.span();
         let _comma: Token![,] = input.parse()?;
         let style_ident: Ident = input.parse()?;
-        let style_str = style_ident.to_string();
         let style = FaStyle::from_ident(&style_ident)?;
 
         let family = if input.peek(Token![,]) && input.peek2(Ident) {
@@ -179,10 +174,8 @@ impl Parse for FaInput {
 
         Ok(FaInput {
             name: name_lit.value(),
-            #[cfg(not(feature = "test-icons"))]
             name_span,
             style,
-            style_str,
             family,
         })
     }
@@ -211,35 +204,19 @@ pub fn fa(input: TokenStream) -> TokenStream {
     // Cache key combines family and style for uniqueness
     let cache_key = format!("{}-{}", family_gql, style_gql);
 
-    // In test-icons mode, return a placeholder SVG without any network calls
-    #[cfg(feature = "test-icons")]
-    {
-        let _ = cache_key; // suppress unused warning
-        let placeholder = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true" width="1em" height="1em" class="fa-svg" data-icon="{name}" data-style="{}">{}</svg>"#,
-            input.style_str,
-            r#"<rect width="512" height="512" fill="currentColor" opacity="0.2"/>"#
-        );
-        return quote! { #placeholder }.into();
-    }
+    let svg = match fetch::get_icon(name, family_gql, style_gql, &cache_key) {
+        Ok(svg) => svg,
+        Err(e) => {
+            let msg = format!(
+                "failed to fetch Font Awesome icon `{name}` ({}/{}): {e}",
+                input.family.graphql_value(),
+                input.style.graphql_value()
+            );
+            return syn::Error::new(input.name_span, msg)
+                .to_compile_error()
+                .into();
+        }
+    };
 
-    // Real mode: fetch from API with caching
-    #[cfg(not(feature = "test-icons"))]
-    {
-        let svg = match fetch::get_icon(name, family_gql, style_gql, &cache_key) {
-            Ok(svg) => svg,
-            Err(e) => {
-                let msg = format!(
-                    "failed to fetch Font Awesome icon `{name}` ({}/{}): {e}",
-                    input.family.graphql_value(),
-                    input.style.graphql_value()
-                );
-                return syn::Error::new(input.name_span, msg)
-                    .to_compile_error()
-                    .into();
-            }
-        };
-
-        quote! { #svg }.into()
-    }
+    quote! { #svg }.into()
 }
