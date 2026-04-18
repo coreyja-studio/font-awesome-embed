@@ -3,7 +3,6 @@ use quote::quote;
 use syn::{Ident, LitStr, Token, parse::Parse, parse::ParseStream, parse_macro_input};
 
 mod fetch;
-#[cfg(not(feature = "test-icons"))]
 mod postprocess;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
