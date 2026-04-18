@@ -19,38 +19,38 @@ pub fn process_svg(svg: &str) -> String {
     }
 
     // Inject attributes into the opening <svg> tag
-    if let Some(svg_start) = result.find("<svg") {
-        if let Some(tag_end) = result[svg_start..].find('>') {
-            let tag_end = svg_start + tag_end;
-            let tag = &result[svg_start..tag_end];
+    if let Some(svg_start) = result.find("<svg")
+        && let Some(tag_end) = result[svg_start..].find('>')
+    {
+        let tag_end = svg_start + tag_end;
+        let tag = &result[svg_start..tag_end];
 
-            // Add fill="currentColor" if not present
-            let mut attrs_to_add = String::new();
-            if !tag.contains("fill=") {
-                attrs_to_add.push_str(r#" fill="currentColor""#);
-            }
+        // Add fill="currentColor" if not present
+        let mut attrs_to_add = String::new();
+        if !tag.contains("fill=") {
+            attrs_to_add.push_str(r#" fill="currentColor""#);
+        }
 
-            // Add aria-hidden="true" if not present
-            if !tag.contains("aria-hidden") {
-                attrs_to_add.push_str(r#" aria-hidden="true""#);
-            }
+        // Add aria-hidden="true" if not present
+        if !tag.contains("aria-hidden") {
+            attrs_to_add.push_str(r#" aria-hidden="true""#);
+        }
 
-            // Add width/height if not present
-            if !tag.contains("width=") {
-                attrs_to_add.push_str(r#" width="1em""#);
-            }
-            if !tag.contains("height=") {
-                attrs_to_add.push_str(r#" height="1em""#);
-            }
+        // Add width/height if not present
+        if !tag.contains("width=") {
+            attrs_to_add.push_str(r#" width="1em""#);
+        }
+        if !tag.contains("height=") {
+            attrs_to_add.push_str(r#" height="1em""#);
+        }
 
-            // Add class if not present
-            if !tag.contains("class=") {
-                attrs_to_add.push_str(r#" class="fa-svg""#);
-            }
+        // Add class if not present
+        if !tag.contains("class=") {
+            attrs_to_add.push_str(r#" class="fa-svg""#);
+        }
 
-            if !attrs_to_add.is_empty() {
-                result.insert_str(svg_start + 4, &attrs_to_add);
-            }
+        if !attrs_to_add.is_empty() {
+            result.insert_str(svg_start + 4, &attrs_to_add);
         }
     }
 
