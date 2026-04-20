@@ -1,11 +1,13 @@
 use std::fs;
 use std::path::PathBuf;
 
+use serde::Deserialize;
+
 /// Get an icon SVG, checking cache first, then fetching from the API.
 ///
-/// When the `test-icons` feature is enabled, `fetch_from_api` returns a
-/// placeholder SVG instead of making network calls — but the cache and
-/// post-processing layers still run, exercising the full pipeline.
+/// When the `test-icons` feature is enabled, the HTTP calls return fake
+/// responses — but caching, query building, response parsing, and
+/// post-processing all run the same code path as production.
 pub fn get_icon(name: &str, family: &str, style: &str, cache_key: &str) -> Result<String, String> {
     use crate::postprocess;
 
@@ -14,7 +16,7 @@ pub fn get_icon(name: &str, family: &str, style: &str, cache_key: &str) -> Resul
         return Ok(cached);
     }
 
-    // Fetch from API (or return a fake in test-icons mode)
+    // Fetch from API (HTTP calls are faked in test-icons mode)
     let raw_svg = fetch_from_api(name, family, style)?;
 
     // Post-process the SVG
@@ -49,84 +51,133 @@ fn cache_set(name: &str, style: &str, svg: &str) {
     let _ = fs::write(path, svg);
 }
 
-/// In test-icons mode, return a raw placeholder SVG that mimics the shape
-/// of a real API response. The postprocessor will add fill, aria-hidden,
-/// width, height, and class attributes — just like it does for real icons.
-#[cfg(feature = "test-icons")]
-fn fetch_from_api(name: &str, _family: &str, style: &str) -> Result<String, String> {
-    let style_lower = style.to_lowercase();
-    Ok(format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-icon="{name}" data-style="{style_lower}"><rect width="512" height="512" opacity="0.2"/></svg>"#
-    ))
-}
+// --- API response types (always compiled) ---
 
-// --- Everything below is only compiled when test-icons is NOT enabled ---
-
-#[cfg(not(feature = "test-icons"))]
-use serde::Deserialize;
-
-#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
+#[allow(dead_code)] // Constructed by serde, unused in test-icons mode
 struct TokenResponse {
     access_token: String,
 }
 
-#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct GraphQLResponse {
     data: Option<GraphQLData>,
     errors: Option<Vec<GraphQLError>>,
 }
 
-#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct GraphQLData {
     release: ReleaseData,
 }
 
-#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct ReleaseData {
     icon: Option<IconData>,
 }
 
-#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct IconData {
     svgs: Vec<SvgEntry>,
 }
 
-#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct SvgEntry {
     html: String,
 }
 
-#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct GraphQLError {
     message: String,
 }
 
-#[cfg(not(feature = "test-icons"))]
-fn get_access_token(api_token: &str) -> Result<String, String> {
-    let resp: TokenResponse = ureq::post("https://api.fontawesome.com/token")
-        .header("Authorization", &format!("Bearer {api_token}"))
-        .send_empty()
-        .map_err(|e| format!("token exchange request failed: {e}"))?
-        .body_mut()
-        .read_json()
-        .map_err(|e| format!("failed to parse token response: {e}"))?;
+// --- HTTP transport (faked in test-icons mode) ---
 
-    Ok(resp.access_token)
+/// Exchange an API token for an access token.
+///
+/// In test-icons mode, returns a fake token without making any HTTP call.
+fn get_access_token(api_token: &str) -> Result<String, String> {
+    #[cfg(feature = "test-icons")]
+    {
+        let _ = api_token;
+        return Ok("test-fake-token".to_string());
+    }
+
+    #[cfg(not(feature = "test-icons"))]
+    {
+        let resp: TokenResponse = ureq::post("https://api.fontawesome.com/token")
+            .header("Authorization", &format!("Bearer {api_token}"))
+            .send_empty()
+            .map_err(|e| format!("token exchange request failed: {e}"))?
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("failed to parse token response: {e}"))?;
+
+        Ok(resp.access_token)
+    }
 }
 
-#[cfg(not(feature = "test-icons"))]
+/// Send a GraphQL request to the Font Awesome API.
+///
+/// In test-icons mode, returns a fake response with a placeholder SVG
+/// instead of making a network call. The response has the same structure
+/// as a real API response, so downstream parsing is exercised in both modes.
+fn send_graphql_request(
+    access_token: &str,
+    body: &serde_json::Value,
+    name: &str,
+    style: &str,
+) -> Result<GraphQLResponse, String> {
+    #[cfg(feature = "test-icons")]
+    {
+        let _ = (access_token, body);
+        let style_lower = style.to_lowercase();
+        return Ok(GraphQLResponse {
+            data: Some(GraphQLData {
+                release: ReleaseData {
+                    icon: Some(IconData {
+                        svgs: vec![SvgEntry {
+                            html: format!(
+                                r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-icon="{name}" data-style="{style_lower}"><rect width="512" height="512" opacity="0.2"/></svg>"#
+                            ),
+                        }],
+                    }),
+                },
+            }),
+            errors: None,
+        });
+    }
+
+    #[cfg(not(feature = "test-icons"))]
+    {
+        let _ = (name, style);
+        let resp: GraphQLResponse = ureq::post("https://api.fontawesome.com")
+            .header("Authorization", &format!("Bearer {access_token}"))
+            .send_json(body)
+            .map_err(|e| format!("GraphQL request failed: {e}"))?
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("failed to parse GraphQL response: {e}"))?;
+
+        Ok(resp)
+    }
+}
+
+/// Fetch an icon SVG from the Font Awesome GraphQL API.
+///
+/// Builds the query, authenticates, sends the request, and extracts
+/// the SVG from the response. In test-icons mode, the HTTP calls are
+/// faked but query building and response parsing still run.
 fn fetch_from_api(name: &str, family: &str, style: &str) -> Result<String, String> {
-    let api_token = std::env::var("FONT_AWESOME_TOKEN").map_err(|_| {
-        "FONT_AWESOME_TOKEN environment variable not set. \
-         Set it to your Font Awesome API token, or use the `test-icons` feature for development."
-            .to_string()
+    let api_token = std::env::var("FONT_AWESOME_TOKEN").or_else(|_| {
+        #[cfg(feature = "test-icons")]
+        return Ok::<String, String>("test-token".to_string());
+
+        #[cfg(not(feature = "test-icons"))]
+        Err(
+            "FONT_AWESOME_TOKEN environment variable not set. \
+             Set it to your Font Awesome API token, or use the `test-icons` feature for development."
+                .to_string(),
+        )
     })?;
 
     let access_token = get_access_token(&api_token)?;
@@ -145,13 +196,7 @@ fn fetch_from_api(name: &str, family: &str, style: &str) -> Result<String, Strin
 
     let body = serde_json::json!({ "query": query });
 
-    let resp: GraphQLResponse = ureq::post("https://api.fontawesome.com")
-        .header("Authorization", &format!("Bearer {access_token}"))
-        .send_json(&body)
-        .map_err(|e| format!("GraphQL request failed: {e}"))?
-        .body_mut()
-        .read_json()
-        .map_err(|e| format!("failed to parse GraphQL response: {e}"))?;
+    let resp = send_graphql_request(&access_token, &body, name, style)?;
 
     if let Some(errors) = resp.errors {
         let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
