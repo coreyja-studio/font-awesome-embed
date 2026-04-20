@@ -99,7 +99,7 @@ fn get_access_token(api_token: &str) -> Result<String, String> {
     #[cfg(feature = "test-icons")]
     {
         let _ = api_token;
-        return Ok("test-fake-token".to_string());
+        Ok("test-fake-token".to_string())
     }
 
     #[cfg(not(feature = "test-icons"))]
@@ -131,7 +131,7 @@ fn send_graphql_request(
     {
         let _ = (access_token, body);
         let style_lower = style.to_lowercase();
-        return Ok(GraphQLResponse {
+        Ok(GraphQLResponse {
             data: Some(GraphQLData {
                 release: ReleaseData {
                     icon: Some(IconData {
@@ -144,7 +144,7 @@ fn send_graphql_request(
                 },
             }),
             errors: None,
-        });
+        })
     }
 
     #[cfg(not(feature = "test-icons"))]
