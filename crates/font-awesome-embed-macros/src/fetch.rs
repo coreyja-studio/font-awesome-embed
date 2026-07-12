@@ -100,7 +100,19 @@ pub fn get_icon(name: &str, family: &str, style: &str) -> Result<String, String>
     Ok(processed)
 }
 
+/// Cache root, in priority order: `FA_CACHE_DIR` (explicit, e.g. a
+/// directory committed to the consuming repo so CI and Docker builds need
+/// neither network nor token), then `OUT_DIR`, then a shared temp dir.
+///
+/// `FA_CACHE_DIR` should be an absolute path — proc macros make no
+/// guarantee about the working directory. Set it via `[env]` in
+/// `.cargo/config.toml` with `relative = true` to anchor it to the repo.
 fn cache_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("FA_CACHE_DIR")
+        && !dir.is_empty()
+    {
+        return PathBuf::from(dir);
+    }
     if let Ok(out_dir) = std::env::var("OUT_DIR") {
         return PathBuf::from(out_dir).join("fa-cache");
     }
@@ -360,6 +372,15 @@ mod tests {
         assert!(validate_version("7.0.0-beta1").is_ok());
         assert!(validate_version("../../etc").is_err());
         assert!(validate_version("").is_err());
+    }
+
+    #[test]
+    fn cache_dir_honors_fa_cache_dir_env() {
+        // SAFETY: no other test reads or writes this variable.
+        unsafe { std::env::set_var("FA_CACHE_DIR", "/custom/cache") };
+        let dir = cache_dir();
+        unsafe { std::env::remove_var("FA_CACHE_DIR") };
+        assert_eq!(dir, PathBuf::from("/custom/cache"));
     }
 
     #[test]
