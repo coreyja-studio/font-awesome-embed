@@ -192,7 +192,35 @@ fn http_agent() -> ureq::Agent {
         .new_agent()
 }
 
+/// Retry transient API failures (rate limits, server errors) with backoff.
+/// A compile expanding many icons in parallel with other CI jobs can trip
+/// Font Awesome's rate limiting; a brief pause resolves it.
+#[cfg(not(feature = "test-icons"))]
+fn retry_transient<T>(mut call: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    let mut delay = std::time::Duration::from_secs(1);
+    let mut last_err = String::new();
+    for attempt in 0..4 {
+        match call() {
+            Ok(value) => return Ok(value),
+            Err(e) => {
+                let transient = e.contains("status: 429") || e.contains("status: 5");
+                last_err = e;
+                if !transient || attempt == 3 {
+                    break;
+                }
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+        }
+    }
+    Err(last_err)
+}
+
 /// Exchange an API token for an access token.
+///
+/// The access token is cached for the life of the process — without this,
+/// every `fa!()` expansion performs its own token exchange and a compile
+/// with many icons rate-limits the token endpoint (HTTP 429).
 ///
 /// In test-icons mode, returns a fake token without making any HTTP call.
 fn get_access_token(api_token: &str) -> Result<String, String> {
@@ -204,16 +232,27 @@ fn get_access_token(api_token: &str) -> Result<String, String> {
 
     #[cfg(not(feature = "test-icons"))]
     {
-        let resp: TokenResponse = http_agent()
-            .post("https://api.fontawesome.com/token")
-            .header("Authorization", &format!("Bearer {api_token}"))
-            .send_empty()
-            .map_err(|e| format!("token exchange request failed: {e}"))?
-            .body_mut()
-            .read_json()
-            .map_err(|e| format!("failed to parse token response: {e}"))?;
+        static ACCESS_TOKEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-        Ok(resp.access_token)
+        let mut cached = ACCESS_TOKEN.lock().expect("access token lock poisoned");
+        if let Some(token) = cached.as_ref() {
+            return Ok(token.clone());
+        }
+
+        let token = retry_transient(|| {
+            let resp: TokenResponse = http_agent()
+                .post("https://api.fontawesome.com/token")
+                .header("Authorization", &format!("Bearer {api_token}"))
+                .send_empty()
+                .map_err(|e| format!("token exchange request failed: {e}"))?
+                .body_mut()
+                .read_json()
+                .map_err(|e| format!("failed to parse token response: {e}"))?;
+            Ok(resp.access_token)
+        })?;
+
+        *cached = Some(token.clone());
+        Ok(token)
     }
 }
 
@@ -251,16 +290,18 @@ fn send_graphql_request(
     #[cfg(not(feature = "test-icons"))]
     {
         let _ = (name, style);
-        let resp: GraphQLResponse = http_agent()
-            .post("https://api.fontawesome.com")
-            .header("Authorization", &format!("Bearer {access_token}"))
-            .send_json(body)
-            .map_err(|e| format!("GraphQL request failed: {e}"))?
-            .body_mut()
-            .read_json()
-            .map_err(|e| format!("failed to parse GraphQL response: {e}"))?;
+        retry_transient(|| {
+            let resp: GraphQLResponse = http_agent()
+                .post("https://api.fontawesome.com")
+                .header("Authorization", &format!("Bearer {access_token}"))
+                .send_json(body)
+                .map_err(|e| format!("GraphQL request failed: {e}"))?
+                .body_mut()
+                .read_json()
+                .map_err(|e| format!("failed to parse GraphQL response: {e}"))?;
 
-        Ok(resp)
+            Ok(resp)
+        })
     }
 }
 
