@@ -9,7 +9,7 @@ env:
 jobs:
   rust-checks:
     name: Clippy + Test
-    runs-on: [self-hosted, large]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 

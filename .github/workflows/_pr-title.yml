@@ -6,7 +6,7 @@ on:
 jobs:
   pr-title:
     if: github.event_name == 'pull_request'
-    runs-on: [self-hosted, small]
+    runs-on: ubuntu-latest
     steps:
       - name: Check PR title follows conventional commits
         env:

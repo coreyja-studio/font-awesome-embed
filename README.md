@@ -13,6 +13,9 @@ let svg: &str = fa!("house", solid);
 // FA7 family packs via `family = ...`
 let svg: &str = fa!("star", solid, family = notdog);
 let svg: &str = fa!("star", regular, family = pixel);
+
+// Extra CSS classes on the <svg> element via `class = ...`
+let svg: &str = fa!("xmark", solid, class = "text-xl text-red-400");
 ```
 
 ### Maud integration
@@ -91,21 +94,15 @@ icon is fetched once per machine, not once per build. SVGs are post-processed fo
 embedding: `fill="currentColor"`, `aria-hidden="true"`, `width`/`height` of `1em`, and a
 `fa-svg` class for global styling.
 
-## Committed cache — build with no token, no network
+## CI and Docker builds
 
-Point `FA_CACHE_DIR` at a directory inside your repo and commit it. Cache hits skip
-the token check and the network entirely, so CI, Docker builds, and PR review apps
-need no secret — you only need `FONT_AWESOME_TOKEN` locally the first time you add a
-new icon (which writes a new file to the cache; commit it with your change).
+Provide `FONT_AWESOME_TOKEN` wherever the consuming crate is compiled: an Actions
+secret in CI workflows, and a BuildKit secret in Dockerfiles
+(`RUN --mount=type=secret,id=FONT_AWESOME_TOKEN ... cargo build`, with
+`flyctl deploy --build-secret` / `docker build --secret` at the call site).
 
-In the consuming repo's `.cargo/config.toml` (`relative = true` makes cargo pass an
-absolute path, since proc macros make no guarantee about the working directory):
-
-```toml
-[env]
-FA_CACHE_DIR = { value = ".fa-cache", relative = true }
-```
-
-Note: the cache stores Font Awesome's SVGs. Committing Free icons to a public repo
-is fine (CC BY 4.0 — keep attribution somewhere reasonable); commit Pro icons only
-to repos that are private to your license.
+**Do not commit the cache directory.** Not redistributing Font Awesome's SVGs —
+in particular Pro icons — is a design goal of this crate: the repo holds only icon
+*names*, and the SVGs are fetched under your own license at build time. `FA_CACHE_DIR`
+exists so ephemeral environments can *persist* the cache between builds (e.g. point it
+inside a directory your CI already caches, like `target/`), not so it can be checked in.

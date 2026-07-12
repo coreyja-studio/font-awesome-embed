@@ -1,4 +1,4 @@
-error: unexpected argument `style`. Expected `family = <family>`
+error: unexpected argument `style`. Expected `family = <family>` or `class = "..."`
  --> tests/ui/fail/bad_named_arg.rs:3:33
   |
 3 |     let _ = fa!("house", solid, style = bold);

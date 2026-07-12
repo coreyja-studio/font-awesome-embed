@@ -22,7 +22,7 @@ jobs:
   ready:
     if: always()
     needs: [pr-title, fmt, rust-checks, cargo-deny]
-    runs-on: [self-hosted, small]
+    runs-on: ubuntu-latest
     steps:
       - name: Check results
         run: |
