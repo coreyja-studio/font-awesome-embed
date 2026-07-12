@@ -6,7 +6,6 @@ fn main() {
     let _: &str = fa!("github", brands);
     let _: &str = fa!("house", light);
     let _: &str = fa!("house", thin);
-    let _: &str = fa!("house", duotone);
-    let _: &str = fa!("house", semibold);
+    let _: &str = fa!("house", semibold, family = utility);
     let _: &str = fa!("house", solid,);
 }

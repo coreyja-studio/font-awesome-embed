@@ -2,6 +2,9 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Ident, LitStr, Token, parse::Parse, parse::ParseStream, parse_macro_input};
 
+mod fetch;
+mod postprocess;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FaFamily {
     Classic,
@@ -14,14 +17,19 @@ enum FaFamily {
     Jelly,
     JellyDuo,
     JellyFill,
+    Mosaic,
     Notdog,
     NotdogDuo,
+    Pixel,
     Slab,
+    SlabDuo,
     SlabPress,
+    SlabPressDuo,
     Thumbprint,
     Utility,
     UtilityDuo,
     UtilityFill,
+    Vellum,
     Whiteboard,
 }
 
@@ -42,26 +50,31 @@ impl FaFamily {
             "jelly" => Ok(Self::Jelly),
             "jelly_duo" => Ok(Self::JellyDuo),
             "jelly_fill" => Ok(Self::JellyFill),
+            "mosaic" => Ok(Self::Mosaic),
             "notdog" => Ok(Self::Notdog),
             "notdog_duo" => Ok(Self::NotdogDuo),
+            "pixel" => Ok(Self::Pixel),
             "slab" => Ok(Self::Slab),
+            "slab_duo" => Ok(Self::SlabDuo),
             "slab_press" => Ok(Self::SlabPress),
+            "slab_press_duo" => Ok(Self::SlabPressDuo),
             "thumbprint" => Ok(Self::Thumbprint),
             "utility" => Ok(Self::Utility),
             "utility_duo" => Ok(Self::UtilityDuo),
             "utility_fill" => Ok(Self::UtilityFill),
+            "vellum" => Ok(Self::Vellum),
             "whiteboard" => Ok(Self::Whiteboard),
             other => Err(format!(
                 "unknown Font Awesome family: `{other}`. Expected one of: \
                  classic, duotone, sharp, sharp_duotone, chisel, etch, graphite, \
-                 jelly, jelly_duo, jelly_fill, notdog, notdog_duo, slab, slab_press, \
-                 thumbprint, utility, utility_duo, utility_fill, whiteboard"
+                 jelly, jelly_duo, jelly_fill, mosaic, notdog, notdog_duo, pixel, \
+                 slab, slab_duo, slab_press, slab_press_duo, thumbprint, \
+                 utility, utility_duo, utility_fill, vellum, whiteboard"
             )),
         }
     }
 }
 
-#[allow(dead_code)]
 impl FaFamily {
     fn graphql_value(&self) -> &'static str {
         match self {
@@ -75,14 +88,19 @@ impl FaFamily {
             Self::Jelly => "JELLY",
             Self::JellyDuo => "JELLY_DUO",
             Self::JellyFill => "JELLY_FILL",
+            Self::Mosaic => "MOSAIC",
             Self::Notdog => "NOTDOG",
             Self::NotdogDuo => "NOTDOG_DUO",
+            Self::Pixel => "PIXEL",
             Self::Slab => "SLAB",
+            Self::SlabDuo => "SLAB_DUO",
             Self::SlabPress => "SLAB_PRESS",
+            Self::SlabPressDuo => "SLAB_PRESS_DUO",
             Self::Thumbprint => "THUMBPRINT",
             Self::Utility => "UTILITY",
             Self::UtilityDuo => "UTILITY_DUO",
             Self::UtilityFill => "UTILITY_FILL",
+            Self::Vellum => "VELLUM",
             Self::Whiteboard => "WHITEBOARD",
         }
     }
@@ -120,7 +138,6 @@ impl FaStyle {
     }
 }
 
-#[allow(dead_code)]
 impl FaStyle {
     fn graphql_value(&self) -> &'static str {
         match self {
@@ -135,9 +152,9 @@ impl FaStyle {
     }
 }
 
-#[allow(dead_code)]
 struct FaInput {
     name: String,
+    name_span: proc_macro2::Span,
     style: FaStyle,
     family: FaFamily,
 }
@@ -145,6 +162,12 @@ struct FaInput {
 impl Parse for FaInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let name_lit: LitStr = input.parse()?;
+        let name_span = name_lit.span();
+        // Reject anything outside the FA slug charset at parse time — this
+        // is the security boundary for the cache path and a friendlier
+        // error than an API "not found" for typos like `fa!("House", ...)`.
+        fetch::validate_icon_name(&name_lit.value())
+            .map_err(|msg| syn::Error::new(name_span, msg))?;
         let _comma: Token![,] = input.parse()?;
         let style_ident: Ident = input.parse()?;
         let style = FaStyle::from_ident(&style_ident)?;
@@ -171,6 +194,7 @@ impl Parse for FaInput {
 
         Ok(FaInput {
             name: name_lit.value(),
+            name_span,
             style,
             family,
         })
@@ -190,7 +214,26 @@ fn default_family() -> syn::Result<FaFamily> {
 }
 
 #[proc_macro]
+#[allow(clippy::needless_return)]
 pub fn fa(input: TokenStream) -> TokenStream {
-    let _input = parse_macro_input!(input as FaInput);
-    quote! { "" }.into()
+    let input = parse_macro_input!(input as FaInput);
+    let name = &input.name;
+    let family_gql = input.family.graphql_value();
+    let style_gql = input.style.graphql_value();
+
+    let svg = match fetch::get_icon(name, family_gql, style_gql) {
+        Ok(svg) => svg,
+        Err(e) => {
+            let msg = format!(
+                "failed to fetch Font Awesome icon `{name}` ({}/{}): {e}",
+                input.family.graphql_value(),
+                input.style.graphql_value()
+            );
+            return syn::Error::new(input.name_span, msg)
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    quote! { #svg }.into()
 }

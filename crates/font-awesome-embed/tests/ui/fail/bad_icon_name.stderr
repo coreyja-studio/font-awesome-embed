@@ -1,0 +1,11 @@
+error: invalid icon name `../../etc/passwd`: icon names may only contain lowercase letters, digits, and hyphens
+ --> tests/ui/fail/bad_icon_name.rs:4:17
+  |
+4 |     let _ = fa!("../../etc/passwd", solid);
+  |                 ^^^^^^^^^^^^^^^^^^
+
+error: invalid icon name `House`: icon names may only contain lowercase letters, digits, and hyphens
+ --> tests/ui/fail/bad_icon_name.rs:5:17
+  |
+5 |     let _ = fa!("House", solid);
+  |                 ^^^^^^^

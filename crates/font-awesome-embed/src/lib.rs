@@ -7,6 +7,9 @@ pub mod maud {
         ($name:literal, $style:ident) => {
             ::maud::PreEscaped($crate::fa!($name, $style))
         };
+        ($name:literal, $style:ident, family = $family:ident) => {
+            ::maud::PreEscaped($crate::fa!($name, $style, family = $family))
+        };
     }
 
     pub use crate::fa_maud as fa;
