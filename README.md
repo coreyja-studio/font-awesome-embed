@@ -81,11 +81,31 @@ is a compile error naming the family and style.
 
 | Env var | Effect |
 |---|---|
-| `FONT_AWESOME_TOKEN` | Font Awesome API token used at compile time (required unless `test-icons`) |
+| `FONT_AWESOME_TOKEN` | Font Awesome API token used at compile time (required on cache miss unless `test-icons`) |
 | `FA_VERSION` | Font Awesome release to fetch from (default: pinned, currently `7.3.0`) |
 | `FA_DEFAULT_FAMILY` | Family used when no `family = ...` is given (default: `classic`) |
+| `FA_CACHE_DIR` | Cache directory override (default: `$OUT_DIR/fa-cache`, else a shared temp dir) |
 
 Fetched SVGs are cached on disk (keyed by release version, family, and style), so each
 icon is fetched once per machine, not once per build. SVGs are post-processed for
 embedding: `fill="currentColor"`, `aria-hidden="true"`, `width`/`height` of `1em`, and a
 `fa-svg` class for global styling.
+
+## Committed cache — build with no token, no network
+
+Point `FA_CACHE_DIR` at a directory inside your repo and commit it. Cache hits skip
+the token check and the network entirely, so CI, Docker builds, and PR review apps
+need no secret — you only need `FONT_AWESOME_TOKEN` locally the first time you add a
+new icon (which writes a new file to the cache; commit it with your change).
+
+In the consuming repo's `.cargo/config.toml` (`relative = true` makes cargo pass an
+absolute path, since proc macros make no guarantee about the working directory):
+
+```toml
+[env]
+FA_CACHE_DIR = { value = ".fa-cache", relative = true }
+```
+
+Note: the cache stores Font Awesome's SVGs. Committing Free icons to a public repo
+is fine (CC BY 4.0 — keep attribution somewhere reasonable); commit Pro icons only
+to repos that are private to your license.
