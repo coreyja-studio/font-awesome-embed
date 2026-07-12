@@ -1,0 +1,17 @@
+error: invalid class `foo" onload="evil()`: classes may not contain quotes, angle brackets, or control characters
+ --> tests/ui/fail/bad_class.rs:4:41
+  |
+4 |     let _ = fa!("house", solid, class = "foo\" onload=\"evil()");
+  |                                         ^^^^^^^^^^^^^^^^^^^^^^^
+
+error: class must not be empty
+ --> tests/ui/fail/bad_class.rs:5:41
+  |
+5 |     let _ = fa!("house", solid, class = "");
+  |                                         ^^
+
+error: duplicate `class` argument
+ --> tests/ui/fail/bad_class.rs:6:46
+  |
+6 |     let _ = fa!("house", solid, class = "a", class = "b");
+  |                                              ^^^^^

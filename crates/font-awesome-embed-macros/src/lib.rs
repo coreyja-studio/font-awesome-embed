@@ -157,6 +157,22 @@ struct FaInput {
     name_span: proc_macro2::Span,
     style: FaStyle,
     family: FaFamily,
+    class: Option<String>,
+}
+
+/// Validate a `class = "..."` value: it is spliced into the SVG's class
+/// attribute, so anything that could break out of the attribute is rejected.
+fn validate_class(class: &str) -> Result<(), String> {
+    if class.is_empty() {
+        return Err("class must not be empty".to_string());
+    }
+    if class.contains(['"', '<', '>']) || class.chars().any(char::is_control) {
+        return Err(format!(
+            "invalid class `{class}`: classes may not contain quotes, angle \
+             brackets, or control characters"
+        ));
+    }
+    Ok(())
 }
 
 impl Parse for FaInput {
@@ -172,31 +188,52 @@ impl Parse for FaInput {
         let style_ident: Ident = input.parse()?;
         let style = FaStyle::from_ident(&style_ident)?;
 
-        let family = if input.peek(Token![,]) && input.peek2(Ident) {
+        let mut family: Option<FaFamily> = None;
+        let mut class: Option<String> = None;
+
+        while input.peek(Token![,]) && input.peek2(Ident) {
             let _comma: Token![,] = input.parse()?;
             let key: Ident = input.parse()?;
+            let _eq: Token![=] = input.parse()?;
             if key == "family" {
-                let _eq: Token![=] = input.parse()?;
+                if family.is_some() {
+                    return Err(syn::Error::new(key.span(), "duplicate `family` argument"));
+                }
                 let family_ident: Ident = input.parse()?;
-                FaFamily::from_ident(&family_ident)?
+                family = Some(FaFamily::from_ident(&family_ident)?);
+            } else if key == "class" {
+                if class.is_some() {
+                    return Err(syn::Error::new(key.span(), "duplicate `class` argument"));
+                }
+                let class_lit: LitStr = input.parse()?;
+                let value = class_lit.value();
+                validate_class(&value).map_err(|msg| syn::Error::new(class_lit.span(), msg))?;
+                class = Some(value);
             } else {
                 return Err(syn::Error::new(
                     key.span(),
-                    format!("unexpected argument `{key}`. Expected `family = <family>`"),
+                    format!(
+                        "unexpected argument `{key}`. Expected `family = <family>` \
+                         or `class = \"...\"`"
+                    ),
                 ));
             }
-        } else {
-            default_family()?
-        };
+        }
 
         // Allow trailing comma
         let _: Option<Token![,]> = input.parse()?;
+
+        let family = match family {
+            Some(family) => family,
+            None => default_family()?,
+        };
 
         Ok(FaInput {
             name: name_lit.value(),
             name_span,
             style,
             family,
+            class,
         })
     }
 }
@@ -233,6 +270,11 @@ pub fn fa(input: TokenStream) -> TokenStream {
                 .to_compile_error()
                 .into();
         }
+    };
+
+    let svg = match &input.class {
+        Some(extra) => postprocess::inject_classes(&svg, extra),
+        None => svg,
     };
 
     quote! { #svg }.into()

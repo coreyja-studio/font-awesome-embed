@@ -72,6 +72,17 @@ pub fn process_svg(svg: &str) -> String {
     collapsed.trim().to_string()
 }
 
+/// Append caller-supplied classes to the `fa-svg` class the post-processor
+/// guarantees on every cached SVG. Runs at macro expansion, after the cache,
+/// so one cached icon serves every distinct `class = "..."` call site.
+pub fn inject_classes(svg: &str, extra: &str) -> String {
+    svg.replacen(
+        r#"class="fa-svg""#,
+        &format!(r#"class="fa-svg {extra}""#),
+        1,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +107,14 @@ mod tests {
         // Should not duplicate fill
         assert!(result.contains(r#"fill="red""#));
         assert!(!result.contains(r#"fill="currentColor""#));
+    }
+
+    #[test]
+    fn injects_extra_classes() {
+        let svg = process_svg(r#"<svg xmlns="x" viewBox="0 0 512 512"><path d="M0 0"/></svg>"#);
+        let out = inject_classes(&svg, "text-xl text-red-400");
+        assert!(out.contains(r#"class="fa-svg text-xl text-red-400""#));
+        assert_eq!(out.matches("text-xl").count(), 1);
     }
 
     #[test]
