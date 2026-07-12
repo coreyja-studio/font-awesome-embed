@@ -12,6 +12,12 @@ fn maud_fa_returns_preescaped() {
 }
 
 #[test]
+fn maud_fa_with_family_override() {
+    let result = fa!("star", solid, family = notdog);
+    assert!(result.0.contains("<svg"));
+}
+
+#[test]
 fn maud_fa_in_html_template() {
     let markup = maud::html! {
         button {
