@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use clap::Parser;
-use font_awesome_embed_core::{FaFamily, FaStyle, FetchMode, get_icon, validate_icon_name};
+use font_awesome_embed_core::{FaFamily, FaStyle, FetchMode, get_icon};
 use serde::Deserialize;
 
 /// Generate a typed TypeScript module of Font Awesome SVGs.
@@ -71,6 +71,10 @@ fn run(cli: Cli) -> Result<(), String> {
 
     match &cli.output {
         Some(path) => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("failed to create output directory: {e}"))?;
+            }
             std::fs::write(path, &ts).map_err(|e| format!("failed to write output: {e}"))?;
         }
         None => {
@@ -83,21 +87,20 @@ fn run(cli: Cli) -> Result<(), String> {
 
 fn generate(manifest: &IconsManifest, mode: FetchMode) -> Result<String, String> {
     let mut entries = Vec::new();
-    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
     for icon in &manifest.icon {
         let family = icon.family.parse::<FaFamily>()?;
         let style = icon.style.parse::<FaStyle>()?;
 
-        let key = (icon.name.clone(), icon.style.clone(), icon.family.clone());
-        if !seen.insert(key) {
+        let const_name = ts_const_name(&icon.name, &icon.style, &icon.family);
+        if !seen.insert(const_name.clone()) {
             return Err(format!(
-                "duplicate icon entry: name=`{}`, style=`{}`, family=`{}`",
+                "duplicate icon entry: const name `{const_name}` is already used \
+                 (name=`{}`, style=`{}`, family=`{}`)",
                 icon.name, icon.style, icon.family
             ));
         }
-
-        validate_icon_name(&icon.name)?;
 
         let svg = get_icon(
             &icon.name,
@@ -106,10 +109,7 @@ fn generate(manifest: &IconsManifest, mode: FetchMode) -> Result<String, String>
             mode,
         )?;
 
-        entries.push(TsIconEntry {
-            const_name: ts_const_name(&icon.name, &icon.style, &icon.family),
-            svg,
-        });
+        entries.push(TsIconEntry { const_name, svg });
     }
 
     Ok(generate_ts_module(&entries))
@@ -334,6 +334,31 @@ family = "classic"
         let result = generate(&manifest, FetchMode::Placeholder);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("duplicate"));
+    }
+
+    #[test]
+    fn duplicate_const_name_collision() {
+        // Two distinct (name, style, family) triples that produce the same
+        // const name because `duotone` is both a valid style and a valid
+        // family, and hyphens in icon names are converted to underscores.
+        //   ts_const_name("arrow", "solid", "duotone")     -> fa_arrow_solid_duotone
+        //   ts_const_name("arrow-solid", "duotone", "classic") -> fa_arrow_solid_duotone
+        let toml_str = r#"
+[[icon]]
+name = "arrow"
+style = "solid"
+family = "duotone"
+
+[[icon]]
+name = "arrow-solid"
+style = "duotone"
+"#;
+        let manifest: IconsManifest = toml::from_str(toml_str).unwrap();
+        let result = generate(&manifest, FetchMode::Placeholder);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("duplicate"));
+        assert!(err.contains("fa_arrow_solid_duotone"));
     }
 
     #[test]
