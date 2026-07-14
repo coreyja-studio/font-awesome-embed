@@ -2,7 +2,9 @@
 resolver = "3"
 members = [
     "crates/font-awesome-embed",
+    "crates/font-awesome-embed-core",
     "crates/font-awesome-embed-macros",
+    "crates/fa-vendor",
 ]
 
 [workspace.package]
@@ -19,3 +21,7 @@ syn = { version = "2", features = ["full"] }
 
 # Optional integrations
 maud = ">=0.26, <0.28"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"

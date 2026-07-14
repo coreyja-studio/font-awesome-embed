@@ -1,0 +1,17 @@
+[package]
+name = "fa-vendor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Generate typed TS icon modules from Font Awesome"
+
+[[bin]]
+name = "fa-vendor"
+path = "src/main.rs"
+
+[dependencies]
+font-awesome-embed-core = { path = "../font-awesome-embed-core" }
+clap.workspace = true
+toml.workspace = true
+serde = { version = "1", features = ["derive"] }
