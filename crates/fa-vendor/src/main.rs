@@ -34,11 +34,29 @@ struct IconEntry {
 }
 
 /// Default family: `FA_DEFAULT_FAMILY` env var, or "classic" if unset.
-/// Serde calls this for each entry that omits the `family` field, so
-/// explicit `family = "classic"` and omitted family produce the same
-/// string — the dedup check catches them as duplicates correctly.
+///
+/// Serde calls this for each entry that omits the `family` field, so an
+/// omitted family and an explicit `family = "<the default>"` produce the
+/// same string and the dedup check reports them as duplicates. (With the
+/// env var unset, that default is "classic".)
+///
+/// The value is validated up front by `validate_default_family` so a typo
+/// here is reported against the env var rather than against whichever
+/// manifest entry happened to omit `family`.
 fn default_family_str() -> String {
     std::env::var("FA_DEFAULT_FAMILY").unwrap_or_else(|_| "classic".to_string())
+}
+
+/// Reject an unparseable `FA_DEFAULT_FAMILY` with a message that names the
+/// env var, mirroring the `fa!()` macro's behaviour.
+fn validate_default_family(value: Option<&str>) -> Result<(), String> {
+    match value {
+        Some(val) => val
+            .parse::<FaFamily>()
+            .map(|_| ())
+            .map_err(|msg| format!("invalid FA_DEFAULT_FAMILY env var: {msg}")),
+        None => Ok(()),
+    }
 }
 
 struct TsIconEntry {
@@ -86,6 +104,8 @@ fn run(cli: Cli) -> Result<(), String> {
 }
 
 fn generate(manifest: &IconsManifest, mode: FetchMode) -> Result<String, String> {
+    validate_default_family(std::env::var("FA_DEFAULT_FAMILY").ok().as_deref())?;
+
     let mut entries = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
@@ -359,6 +379,14 @@ style = "duotone"
         let err = result.unwrap_err();
         assert!(err.contains("duplicate"));
         assert!(err.contains("fa_arrow_solid_duotone"));
+    }
+
+    #[test]
+    fn default_family_env_validated_by_name() {
+        assert!(validate_default_family(None).is_ok());
+        assert!(validate_default_family(Some("sharp")).is_ok());
+        let err = validate_default_family(Some("comic_sans")).unwrap_err();
+        assert!(err.contains("FA_DEFAULT_FAMILY"), "unexpected error: {err}");
     }
 
     #[test]

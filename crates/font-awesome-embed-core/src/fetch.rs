@@ -21,10 +21,20 @@ pub enum FetchMode {
     Placeholder,
 }
 
+/// Cache namespace for a fetch mode.
+///
+/// Placeholder and real SVGs must never share cache entries. When the
+/// `test-icons` feature strips the real transport, nothing reaching the
+/// cache is genuinely real either — so `Real` gets its own `test-icons`
+/// namespace in that build, and a production build can never read an
+/// entry a test build seeded.
 fn cache_mode(mode: FetchMode) -> &'static str {
     match mode {
-        FetchMode::Real => "real",
         FetchMode::Placeholder => "placeholders",
+        #[cfg(feature = "test-icons")]
+        FetchMode::Real => "test-icons",
+        #[cfg(not(feature = "test-icons"))]
+        FetchMode::Real => "real",
     }
 }
 
@@ -121,12 +131,18 @@ fn fetch_icon(
         FetchMode::Placeholder => Ok(placeholder_svg(name, style)),
         #[cfg(not(feature = "test-icons"))]
         FetchMode::Real => fetch_from_api(name, family, style, version),
+        // Real transport is not compiled when test-icons is on. Fail loudly
+        // rather than silently substituting placeholders: callers that ask
+        // for `Real` (e.g. fa-vendor without `--placeholders`) would
+        // otherwise emit grey rectangles as if they were licensed icons.
         #[cfg(feature = "test-icons")]
         FetchMode::Real => {
-            // Real transport is not compiled when test-icons is on.
-            // Fall back to placeholder so the code compiles cleanly.
-            let _ = (family, version);
-            Ok(placeholder_svg(name, style))
+            let _ = (name, family, style, version);
+            Err("cannot fetch real icons: this binary was built with the \
+                 `test-icons` feature, which strips the HTTP transport. \
+                 Rebuild without `test-icons`, or request placeholders \
+                 explicitly."
+                .to_string())
         }
     }
 }
@@ -412,6 +428,28 @@ mod tests {
         assert!(validate_icon_name("").is_err());
     }
 
+    /// Regression: placeholder SVGs must never be reachable from a cache
+    /// path a real build would read. Before this was enforced, a
+    /// `test-icons` build writing under `FetchMode::Real` seeded the
+    /// `real/` namespace with grey rectangles, and a later production
+    /// build served them without a token and without erroring.
+    #[test]
+    fn cache_namespaces_are_disjoint_across_modes() {
+        let real = cache_path("7.3.0", "CLASSIC", "SOLID", "house", FetchMode::Real);
+        let placeholder = cache_path("7.3.0", "CLASSIC", "SOLID", "house", FetchMode::Placeholder);
+        assert_ne!(real, placeholder);
+    }
+
+    /// A build without real transport must refuse `FetchMode::Real` rather
+    /// than quietly downgrading to placeholders.
+    #[cfg(feature = "test-icons")]
+    #[test]
+    fn real_mode_errors_without_transport() {
+        let err = fetch_icon("house", "CLASSIC", "SOLID", "7.3.0", FetchMode::Real)
+            .expect_err("test-icons build must not produce a real icon");
+        assert!(err.contains("test-icons"), "unexpected error: {err}");
+    }
+
     #[test]
     fn version_charset() {
         assert!(validate_version("7.3.0").is_ok());
@@ -436,7 +474,9 @@ mod tests {
         assert!(s.contains(&format!("v{CACHE_FORMAT_VERSION}")));
         assert!(s.contains("7.3.0"));
         assert!(s.contains("CLASSIC-SOLID"));
-        assert!(s.contains("real"));
+        // Mode segment, not the literal "real" — under `test-icons` the
+        // real-transport namespace is deliberately renamed.
+        assert!(s.contains(cache_mode(FetchMode::Real)));
         assert!(s.ends_with("house.svg"));
     }
 }
