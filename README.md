@@ -106,3 +106,67 @@ in particular Pro icons — is a design goal of this crate: the repo holds only 
 *names*, and the SVGs are fetched under your own license at build time. `FA_CACHE_DIR`
 exists so ephemeral environments can *persist* the cache between builds (e.g. point it
 inside a directory your CI already caches, like `target/`), not so it can be checked in.
+
+## Vendoring icons for frontends
+
+Svelte/TS frontends can't use the `fa!()` proc macro. The `fa-vendor` binary
+generates a typed TypeScript module from a manifest, using the same
+fetch/cache/retry pipeline.
+
+### Manifest format
+
+Create an `icons.toml` file listing the icons your frontend needs:
+
+```toml
+[[icon]]
+name = "house"
+style = "solid"
+
+[[icon]]
+name = "github"
+style = "brands"
+
+[[icon]]
+name = "star"
+style = "solid"
+family = "notdog"
+
+[[icon]]
+name = "500px"
+style = "brands"
+```
+
+Each `[[icon]]` entry has:
+- `name` (required) — Font Awesome icon slug (lowercase, hyphens, digits)
+- `style` (required) — One of: `solid`, `regular`, `light`, `thin`, `brands`, `duotone`, `semibold`
+- `family` (optional, default: `classic` or `FA_DEFAULT_FAMILY`) — Font Awesome family
+
+### Generating the TS module
+
+```sh
+# With a token (fetches real SVGs):
+fa-vendor icons.toml -o src/generated/fa-icons.ts
+
+# Without a token (placeholder SVGs, for CI typecheck/lint):
+fa-vendor icons.toml --placeholders -o src/generated/fa-icons.ts
+```
+
+The output file contains one `export const` per icon (prefixed with `fa_` to
+ensure valid JS identifiers even for digit-leading names like `500px`), a
+`FaIconName` union type of all const names, and a `faIcons: Record<FaIconName, string>`
+lookup table keyed by const name.
+
+### CI workflow
+
+In CI, run `fa-vendor --placeholders` before typecheck/lint steps. This
+generates a valid module with placeholder SVGs — no `FONT_AWESOME_TOKEN`
+secret needed. For production builds, run without `--placeholders` and
+provide the token.
+
+**The generated file must be gitignored.** Add it to `.gitignore`:
+
+```
+src/generated/fa-icons.ts
+```
+
+Never commit Font Awesome SVGs — especially Pro icons — to your repository.

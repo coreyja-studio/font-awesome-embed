@@ -1,0 +1,20 @@
+[[icon]]
+name = "house"
+style = "solid"
+
+[[icon]]
+name = "github"
+style = "brands"
+
+[[icon]]
+name = "star"
+style = "solid"
+family = "notdog"
+
+[[icon]]
+name = "arrow-up-right-from-square"
+style = "regular"
+
+[[icon]]
+name = "500px"
+style = "brands"

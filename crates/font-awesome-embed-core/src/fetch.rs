@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+#[cfg(not(feature = "test-icons"))]
 use serde::Deserialize;
 
 /// Font Awesome release used when `FA_VERSION` is not set.
@@ -13,16 +14,38 @@ pub const FA_DEFAULT_VERSION: &str = "7.3.0";
 /// (which store *processed* SVGs) are never reused across formats.
 const CACHE_FORMAT_VERSION: u32 = 1;
 
-#[cfg(not(feature = "test-icons"))]
-const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Runtime fetch mode: real API calls or static placeholders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchMode {
+    Real,
+    Placeholder,
+}
 
-/// Placeholder and real SVGs must never share cache entries — without a
-/// build script OUT_DIR is unset and both modes fall back to the same
-/// shared temp dir.
-#[cfg(feature = "test-icons")]
-const CACHE_MODE: &str = "test-icons";
-#[cfg(not(feature = "test-icons"))]
-const CACHE_MODE: &str = "real";
+/// Cache namespace for a fetch mode.
+///
+/// Placeholder and real SVGs must never share cache entries. When the
+/// `test-icons` feature strips the real transport, nothing reaching the
+/// cache is genuinely real either — so `Real` gets its own `test-icons`
+/// namespace in that build, and a production build can never read an
+/// entry a test build seeded.
+fn cache_mode(mode: FetchMode) -> &'static str {
+    match mode {
+        FetchMode::Placeholder => "placeholders",
+        #[cfg(feature = "test-icons")]
+        FetchMode::Real => "test-icons",
+        #[cfg(not(feature = "test-icons"))]
+        FetchMode::Real => "real",
+    }
+}
+
+/// Generate a placeholder SVG (no network, no token).
+/// Extracted from send_graphql_request's #[cfg(feature = "test-icons")] branch.
+fn placeholder_svg(name: &str, style: &str) -> String {
+    let style_lower = style.to_lowercase();
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-icon="{name}" data-style="{style_lower}"><rect width="512" height="512" opacity="0.2"/></svg>"#
+    )
+}
 
 /// Validate a Font Awesome icon name.
 ///
@@ -74,30 +97,54 @@ fn fa_version() -> Result<String, String> {
 
 /// Get an icon SVG, checking cache first, then fetching from the API.
 ///
-/// When the `test-icons` feature is enabled, the HTTP calls return fake
-/// responses — but caching, query building, response parsing, and
-/// post-processing all run the same code path as production.
-pub fn get_icon(name: &str, family: &str, style: &str) -> Result<String, String> {
+/// When `mode` is `FetchMode::Placeholder`, or when the `test-icons` feature
+/// is enabled (which strips real transport), placeholder SVGs are used
+/// without any network call. Caching and post-processing run in all modes.
+pub fn get_icon(name: &str, family: &str, style: &str, mode: FetchMode) -> Result<String, String> {
     use crate::postprocess;
 
-    // Defense in depth: the proc macro validates at parse time with a
-    // spanned error, but nothing else may call this with a raw name.
     validate_icon_name(name)?;
 
     let version = fa_version()?;
 
-    if let Some(cached) = cache_get(&version, family, style, name) {
+    if let Some(cached) = cache_get(&version, family, style, name, mode) {
         return Ok(cached);
     }
 
-    // Fetch from API (HTTP calls are faked in test-icons mode)
-    let raw_svg = fetch_from_api(name, family, style, &version)?;
+    let raw_svg = fetch_icon(name, family, style, &version, mode)?;
 
     let processed = postprocess::process_svg(&raw_svg);
 
-    cache_set(&version, family, style, name, &processed);
+    cache_set(&version, family, style, name, &processed, mode);
 
     Ok(processed)
+}
+
+fn fetch_icon(
+    name: &str,
+    family: &str,
+    style: &str,
+    version: &str,
+    mode: FetchMode,
+) -> Result<String, String> {
+    match mode {
+        FetchMode::Placeholder => Ok(placeholder_svg(name, style)),
+        #[cfg(not(feature = "test-icons"))]
+        FetchMode::Real => fetch_from_api(name, family, style, version),
+        // Real transport is not compiled when test-icons is on. Fail loudly
+        // rather than silently substituting placeholders: callers that ask
+        // for `Real` (e.g. fa-vendor without `--placeholders`) would
+        // otherwise emit grey rectangles as if they were licensed icons.
+        #[cfg(feature = "test-icons")]
+        FetchMode::Real => {
+            let _ = (name, family, style, version);
+            Err("cannot fetch real icons: this binary was built with the \
+                 `test-icons` feature, which strips the HTTP transport. \
+                 Rebuild without `test-icons`, or request placeholders \
+                 explicitly."
+                .to_string())
+        }
+    }
 }
 
 /// Cache root, in priority order: `FA_CACHE_DIR` (explicit, e.g. a
@@ -122,67 +169,82 @@ fn cache_dir() -> PathBuf {
 /// Cache path keyed by format version, FA release, family/style, and name —
 /// so bumping the pinned release or the post-processing format never reuses
 /// stale entries. All components are charset-validated or static enum values.
-fn cache_path(version: &str, family: &str, style: &str, name: &str) -> PathBuf {
+fn cache_path(version: &str, family: &str, style: &str, name: &str, mode: FetchMode) -> PathBuf {
     cache_dir()
         .join(format!("v{CACHE_FORMAT_VERSION}"))
-        .join(CACHE_MODE)
+        .join(cache_mode(mode))
         .join(version)
         .join(format!("{family}-{style}"))
         .join(format!("{name}.svg"))
 }
 
-fn cache_get(version: &str, family: &str, style: &str, name: &str) -> Option<String> {
-    fs::read_to_string(cache_path(version, family, style, name)).ok()
+fn cache_get(
+    version: &str,
+    family: &str,
+    style: &str,
+    name: &str,
+    mode: FetchMode,
+) -> Option<String> {
+    fs::read_to_string(cache_path(version, family, style, name, mode)).ok()
 }
 
-fn cache_set(version: &str, family: &str, style: &str, name: &str, svg: &str) {
-    let path = cache_path(version, family, style, name);
+fn cache_set(version: &str, family: &str, style: &str, name: &str, svg: &str, mode: FetchMode) {
+    let path = cache_path(version, family, style, name, mode);
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     let _ = fs::write(path, svg);
 }
 
-// --- API response types (always compiled) ---
+// --- API response types (only compiled when test-icons is off) ---
 
+#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
-#[allow(dead_code)] // Constructed by serde, unused in test-icons mode
 struct TokenResponse {
     access_token: String,
 }
 
+#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct GraphQLResponse {
     data: Option<GraphQLData>,
     errors: Option<Vec<GraphQLError>>,
 }
 
+#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct GraphQLData {
     release: Option<ReleaseData>,
 }
 
+#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct ReleaseData {
     icon: Option<IconData>,
 }
 
+#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct IconData {
     svgs: Vec<SvgEntry>,
 }
 
+#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct SvgEntry {
     html: String,
 }
 
+#[cfg(not(feature = "test-icons"))]
 #[derive(Deserialize)]
 struct GraphQLError {
     message: String,
 }
 
-// --- HTTP transport (faked in test-icons mode) ---
+// --- HTTP transport (only compiled when test-icons is off) ---
+
+#[cfg(not(feature = "test-icons"))]
+const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[cfg(not(feature = "test-icons"))]
 fn http_agent() -> ureq::Agent {
@@ -221,93 +283,55 @@ fn retry_transient<T>(mut call: impl FnMut() -> Result<T, String>) -> Result<T, 
 /// The access token is cached for the life of the process — without this,
 /// every `fa!()` expansion performs its own token exchange and a compile
 /// with many icons rate-limits the token endpoint (HTTP 429).
-///
-/// In test-icons mode, returns a fake token without making any HTTP call.
+#[cfg(not(feature = "test-icons"))]
 fn get_access_token(api_token: &str) -> Result<String, String> {
-    #[cfg(feature = "test-icons")]
-    {
-        let _ = api_token;
-        Ok("test-fake-token".to_string())
+    static ACCESS_TOKEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    let mut cached = ACCESS_TOKEN.lock().expect("access token lock poisoned");
+    if let Some(token) = cached.as_ref() {
+        return Ok(token.clone());
     }
 
-    #[cfg(not(feature = "test-icons"))]
-    {
-        static ACCESS_TOKEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let token = retry_transient(|| {
+        let resp: TokenResponse = http_agent()
+            .post("https://api.fontawesome.com/token")
+            .header("Authorization", &format!("Bearer {api_token}"))
+            .send_empty()
+            .map_err(|e| format!("token exchange request failed: {e}"))?
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("failed to parse token response: {e}"))?;
+        Ok(resp.access_token)
+    })?;
 
-        let mut cached = ACCESS_TOKEN.lock().expect("access token lock poisoned");
-        if let Some(token) = cached.as_ref() {
-            return Ok(token.clone());
-        }
-
-        let token = retry_transient(|| {
-            let resp: TokenResponse = http_agent()
-                .post("https://api.fontawesome.com/token")
-                .header("Authorization", &format!("Bearer {api_token}"))
-                .send_empty()
-                .map_err(|e| format!("token exchange request failed: {e}"))?
-                .body_mut()
-                .read_json()
-                .map_err(|e| format!("failed to parse token response: {e}"))?;
-            Ok(resp.access_token)
-        })?;
-
-        *cached = Some(token.clone());
-        Ok(token)
-    }
+    *cached = Some(token.clone());
+    Ok(token)
 }
 
 /// Send a GraphQL request to the Font Awesome API.
-///
-/// In test-icons mode, returns a fake response with a placeholder SVG
-/// instead of making a network call. The response has the same structure
-/// as a real API response, so downstream parsing is exercised in both modes.
+#[cfg(not(feature = "test-icons"))]
 fn send_graphql_request(
     access_token: &str,
     body: &serde_json::Value,
-    name: &str,
-    style: &str,
 ) -> Result<GraphQLResponse, String> {
-    #[cfg(feature = "test-icons")]
-    {
-        let _ = (access_token, body);
-        let style_lower = style.to_lowercase();
-        Ok(GraphQLResponse {
-            data: Some(GraphQLData {
-                release: Some(ReleaseData {
-                    icon: Some(IconData {
-                        svgs: vec![SvgEntry {
-                            html: format!(
-                                r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" data-icon="{name}" data-style="{style_lower}"><rect width="512" height="512" opacity="0.2"/></svg>"#
-                            ),
-                        }],
-                    }),
-                }),
-            }),
-            errors: None,
-        })
-    }
+    retry_transient(|| {
+        let resp: GraphQLResponse = http_agent()
+            .post("https://api.fontawesome.com")
+            .header("Authorization", &format!("Bearer {access_token}"))
+            .send_json(body)
+            .map_err(|e| format!("GraphQL request failed: {e}"))?
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("failed to parse GraphQL response: {e}"))?;
 
-    #[cfg(not(feature = "test-icons"))]
-    {
-        let _ = (name, style);
-        retry_transient(|| {
-            let resp: GraphQLResponse = http_agent()
-                .post("https://api.fontawesome.com")
-                .header("Authorization", &format!("Bearer {access_token}"))
-                .send_json(body)
-                .map_err(|e| format!("GraphQL request failed: {e}"))?
-                .body_mut()
-                .read_json()
-                .map_err(|e| format!("failed to parse GraphQL response: {e}"))?;
-
-            Ok(resp)
-        })
-    }
+        Ok(resp)
+    })
 }
 
 /// GraphQL query for one icon's SVG. All caller-supplied values are passed
 /// as GraphQL variables — never interpolated into the query text — so a
 /// hostile icon name cannot inject query syntax.
+#[cfg(not(feature = "test-icons"))]
 const ICON_QUERY: &str = "\
 query FaIcon($version: String!, $name: String!, $family: Family!, $style: Style!) {
   release(version: $version) {
@@ -322,14 +346,11 @@ query FaIcon($version: String!, $name: String!, $family: Family!, $style: Style!
 /// Fetch an icon SVG from the Font Awesome GraphQL API.
 ///
 /// Builds the query, authenticates, sends the request, and extracts
-/// the SVG from the response. In test-icons mode, the HTTP calls are
-/// faked but query building and response parsing still run.
+/// the SVG from the response.
+#[cfg(not(feature = "test-icons"))]
 fn fetch_from_api(name: &str, family: &str, style: &str, version: &str) -> Result<String, String> {
     let api_token = match std::env::var("FONT_AWESOME_TOKEN") {
         Ok(token) => token,
-        #[cfg(feature = "test-icons")]
-        Err(_) => "test-token".to_string(),
-        #[cfg(not(feature = "test-icons"))]
         Err(_) => {
             return Err(
                 "FONT_AWESOME_TOKEN environment variable not set. \
@@ -351,7 +372,7 @@ fn fetch_from_api(name: &str, family: &str, style: &str, version: &str) -> Resul
         },
     });
 
-    let resp = send_graphql_request(&access_token, &body, name, style)?;
+    let resp = send_graphql_request(&access_token, &body)?;
 
     if let Some(errors) = resp.errors {
         let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
@@ -407,6 +428,28 @@ mod tests {
         assert!(validate_icon_name("").is_err());
     }
 
+    /// Regression: placeholder SVGs must never be reachable from a cache
+    /// path a real build would read. Before this was enforced, a
+    /// `test-icons` build writing under `FetchMode::Real` seeded the
+    /// `real/` namespace with grey rectangles, and a later production
+    /// build served them without a token and without erroring.
+    #[test]
+    fn cache_namespaces_are_disjoint_across_modes() {
+        let real = cache_path("7.3.0", "CLASSIC", "SOLID", "house", FetchMode::Real);
+        let placeholder = cache_path("7.3.0", "CLASSIC", "SOLID", "house", FetchMode::Placeholder);
+        assert_ne!(real, placeholder);
+    }
+
+    /// A build without real transport must refuse `FetchMode::Real` rather
+    /// than quietly downgrading to placeholders.
+    #[cfg(feature = "test-icons")]
+    #[test]
+    fn real_mode_errors_without_transport() {
+        let err = fetch_icon("house", "CLASSIC", "SOLID", "7.3.0", FetchMode::Real)
+            .expect_err("test-icons build must not produce a real icon");
+        assert!(err.contains("test-icons"), "unexpected error: {err}");
+    }
+
     #[test]
     fn version_charset() {
         assert!(validate_version("7.3.0").is_ok());
@@ -426,11 +469,14 @@ mod tests {
 
     #[test]
     fn cache_path_is_versioned() {
-        let path = cache_path("7.3.0", "CLASSIC", "SOLID", "house");
+        let path = cache_path("7.3.0", "CLASSIC", "SOLID", "house", FetchMode::Real);
         let s = path.to_string_lossy();
         assert!(s.contains(&format!("v{CACHE_FORMAT_VERSION}")));
         assert!(s.contains("7.3.0"));
         assert!(s.contains("CLASSIC-SOLID"));
+        // Mode segment, not the literal "real" — under `test-icons` the
+        // real-transport namespace is deliberately renamed.
+        assert!(s.contains(cache_mode(FetchMode::Real)));
         assert!(s.ends_with("house.svg"));
     }
 }

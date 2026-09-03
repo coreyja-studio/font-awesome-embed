@@ -1,0 +1,15 @@
+[package]
+name = "font-awesome-embed-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core fetch/cache/postprocess logic for font-awesome-embed"
+
+[features]
+test-icons = []
+
+[dependencies]
+ureq = { version = "3", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
