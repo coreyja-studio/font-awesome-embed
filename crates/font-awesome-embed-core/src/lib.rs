@@ -1,5 +1,6 @@
 pub mod fetch;
 pub mod postprocess;
+pub mod token;
 
 // Re-export key items for convenience
 pub use fetch::{FetchMode, get_icon, validate_icon_name};
