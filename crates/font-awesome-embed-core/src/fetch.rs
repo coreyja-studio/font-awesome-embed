@@ -349,16 +349,7 @@ query FaIcon($version: String!, $name: String!, $family: Family!, $style: Style!
 /// the SVG from the response.
 #[cfg(not(feature = "test-icons"))]
 fn fetch_from_api(name: &str, family: &str, style: &str, version: &str) -> Result<String, String> {
-    let api_token = match std::env::var("FONT_AWESOME_TOKEN") {
-        Ok(token) => token,
-        Err(_) => {
-            return Err(
-                "FONT_AWESOME_TOKEN environment variable not set. \
-                 Set it to your Font Awesome API token, or use the `test-icons` feature for development."
-                    .to_string(),
-            );
-        }
-    };
+    let api_token = crate::token::api_token()?;
 
     let access_token = get_access_token(&api_token)?;
 

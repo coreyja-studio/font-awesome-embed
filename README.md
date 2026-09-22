@@ -49,6 +49,15 @@ html! {
    FONT_AWESOME_TOKEN = "{{ exec(command='mull secrets get font-awesome') }}"
    ```
 
+   Or set `FONT_AWESOME_TOKEN_COMMAND` to a shell command that prints the token.
+   It runs once per compile only when `FONT_AWESOME_TOKEN` is unset or blank, so
+   the secret lives in the build process's memory and never on disk or in every
+   shell's environment:
+
+   ```sh
+   export FONT_AWESOME_TOKEN_COMMAND='mull secrets get font-awesome'
+   ```
+
 3. In CI, either provide the token as a secret or build with the `test-icons`
    feature to skip the network entirely (placeholder SVGs, no token needed):
 
@@ -85,6 +94,7 @@ is a compile error naming the family and style.
 | Env var | Effect |
 |---|---|
 | `FONT_AWESOME_TOKEN` | Font Awesome API token used at compile time (required on cache miss unless `test-icons`) |
+| `FONT_AWESOME_TOKEN_COMMAND` | Shell command that prints the API token; used when `FONT_AWESOME_TOKEN` is unset or blank |
 | `FA_VERSION` | Font Awesome release to fetch from (default: pinned, currently `7.3.0`) |
 | `FA_DEFAULT_FAMILY` | Family used when no `family = ...` is given (default: `classic`) |
 | `FA_CACHE_DIR` | Cache directory override (default: `$OUT_DIR/fa-cache`, else a shared temp dir) |
